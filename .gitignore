@@ -1,0 +1,5 @@
+.venv/
+venv/
+avito.db
+.idea/
+__pycache__/
