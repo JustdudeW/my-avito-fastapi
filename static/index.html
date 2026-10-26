@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Объявления | Avito Shtuka</title>
+  <link rel="stylesheet" href="/static/styles.css?v=3">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container nav">
+      <a class="brand" href="/">avito <span>shtuka</span></a>
+      <div class="nav-actions">
+        <a class="nav-link" href="#how">Как это работает</a>
+        <button class="profile-btn" type="button" id="profileBtn">Кошелёк и покупки</button>
+        <button class="primary-btn" type="button" id="openCreate">+ Подать объявление</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container hero-inner">
+        <div>
+          <p class="eyebrow">Маркетплейс рядом</p>
+          <h1>Найди то, что искал</h1>
+          <p class="hero-copy">Покупай, продавай и находи хорошие вещи у людей рядом.</p>
+        </div>
+        <div class="hero-stat"><strong id="adCount">0</strong><span>объявлений<br>сейчас</span></div>
+      </div>
+    </section>
+
+    <section class="container search-section">
+      <div class="search-box">
+        <span class="search-icon">⌕</span>
+        <input id="searchInput" type="search" placeholder="Поиск по объявлениям">
+        <button id="searchBtn" class="search-btn" type="button">Найти</button>
+      </div>
+      <div class="categories" aria-label="Категории">
+        <button class="category active" data-category="all">Все объявления</button>
+        <button class="category" data-category="Транспорт">Транспорт</button>
+        <button class="category" data-category="Электроника">Электроника</button>
+        <button class="category" data-category="Для дома">Для дома</button>
+        <button class="category" data-category="Услуги">Услуги</button>
+        <button class="category" data-category="Одежда">Одежда</button>
+      </div>
+    </section>
+
+    <section class="container content-grid">
+      <aside class="filters">
+        <div class="section-label">Фильтры</div>
+        <label>Статус
+          <select id="statusFilter"><option value="">Все</option><option value="активно">Активные</option><option value="sold">Проданные</option></select>
+        </label>
+        <label>Максимальная цена
+          <input id="priceFilter" type="number" min="0" placeholder="Например, 100000">
+        </label>
+        <button class="secondary-btn full" id="resetBtn" type="button">Сбросить фильтры</button>
+      </aside>
+      <section class="results">
+        <div class="results-head"><div><span class="section-label">Свежие объявления</span><h2>Всё рядом</h2></div><span id="resultHint" class="muted"></span></div>
+        <div id="adsGrid" class="ads-grid"></div>
+        <div id="emptyState" class="empty hidden"><div class="empty-mark">⌕</div><h3>Пока ничего не найдено</h3><p>Попробуйте изменить запрос или добавить первое объявление.</p></div>
+        <div class="pagination" id="pagination"></div>
+      </section>
+    </section>
+  </main>
+
+  <div class="modal hidden" id="createModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-card">
+      <div class="modal-head"><div><span class="section-label">Новое объявление</span><h2 id="modalTitle">Что продаёте?</h2></div><button class="icon-btn" id="closeCreate" type="button" aria-label="Закрыть">×</button></div>
+      <form id="createForm">
+        <label>ID продавца<input name="owner_id" type="number" min="1" value="1" required><small>Сначала создайте пользователя через Swagger: /docs</small></label>
+        <label>Название<input name="title" maxlength="100" placeholder="Например, велосипед" required></label>
+        <label>Описание<textarea name="text_content" rows="4" placeholder="Расскажите о состоянии и особенностях" required></textarea></label>
+        <label>Цена, ₽<input name="price" type="number" min="0" placeholder="0" required></label>
+        <p id="formError" class="form-error"></p>
+        <button class="primary-btn full" type="submit">Опубликовать</button>
+      </form>
+    </div>
+  </div>
+  <div class="modal hidden" id="walletModal" role="dialog" aria-modal="true" aria-labelledby="walletTitle">
+    <div class="modal-card wallet-card">
+      <div class="modal-head"><div><span class="section-label">Личный кабинет</span><h2 id="walletTitle">Кошелёк и покупки</h2></div><button class="icon-btn" id="closeWallet" type="button" aria-label="Закрыть">×</button></div>
+      <label>Кто сейчас пользуется сайтом
+        <select id="currentUserId"><option value="">Выбери пользователя</option></select>
+      </label>
+      <div class="balance-box"><span>Текущий баланс</span><strong id="balanceValue">Введите ID</strong></div>
+      <div class="wallet-actions"><input id="topupAmount" type="number" min="1" placeholder="Сумма пополнения"><button class="primary-btn" id="topupBtn" type="button">Пополнить</button></div>
+      <p id="walletMessage" class="form-error"></p>
+      <div class="history-heading"><div><span class="section-label">Операции</span><h3>Покупки и продажи</h3></div><button class="text-btn" id="refreshHistory" type="button">Обновить</button></div>
+      <div id="transactionsList" class="transactions-list"><p class="muted">Выбери пользователя, чтобы увидеть операции.</p></div>
+    </div>
+  </div>
+  <div class="modal hidden" id="adModal" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+    <div class="modal-card detail-card">
+      <div class="modal-head"><div><span class="section-label">Объявление</span><h2 id="detailTitle"></h2></div><button class="icon-btn" id="closeAd" type="button" aria-label="Закрыть">×</button></div>
+      <p id="detailText" class="detail-text"></p>
+      <div class="detail-meta"><span id="detailSeller"></span><strong id="detailPrice"></strong></div>
+      <button class="primary-btn full" id="detailBuy" type="button">Купить</button>
+    </div>
+  </div>
+  <script src="/static/app.js?v=3"></script>
+</body>
+</html>
