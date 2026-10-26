@@ -2,13 +2,13 @@
 
 ## База данных Microsoft SQL Server
 
-Перед запуском установите SQL Server и ODBC Driver 18 for SQL Server. Создайте базу `AvitoClone`, затем задайте строку подключения:
+Перед запуском надо скачать SQL Server и ODBC Driver 18 for SQL Server. Создать базу `AvitoClone`, затем задайте строку подключения:
 
 ```powershell
 $env:DATABASE_URL = "mssql+pyodbc://@localhost/AvitoClone?driver=ODBC+Driver+18+for+SQL+Server&Trusted_Connection=yes&TrustServerCertificate=yes"
 ```
 
-Таблицы `users` и `advertisements` создаются SQLAlchemy автоматически при старте приложения.
+Таблицы `users` и `advertisements` создаются SQLAlchemy автоматически при старте.
 
 ## Запуск в Windows PowerShell
 
