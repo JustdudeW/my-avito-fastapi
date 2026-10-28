@@ -1,9 +1,10 @@
 import os
 from datetime import datetime
 from fastapi import FastAPI, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, create_engine, text as sql_text
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, create_engine, func, or_, select, text as sql_text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 DATABASE_URL = os.getenv(
@@ -49,6 +50,33 @@ class PurchaseTransaction(Base):
     amount: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="completed")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=sql_text("CURRENT_TIMESTAMP"))
+
+
+class UserCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=50, examples=["Иван"])
+    email: str = Field(min_length=3, max_length=100, examples=["ivan@example.com"])
+    phone: str | None = Field(default=None, max_length=20)
+
+
+class UserUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=50)
+    email: str = Field(min_length=3, max_length=100)
+    phone: str | None = Field(default=None, max_length=20)
+
+
+class AdvertisementCreate(BaseModel):
+    owner_id: int = Field(gt=0, examples=[1])
+    title: str = Field(min_length=1, max_length=100, examples=["Велосипед"])
+    text: str = Field(min_length=1, examples=["В хорошем состоянии"])
+    price: int = Field(ge=0, examples=[15000])
+    status: str = Field(default="активно", max_length=20)
+
+
+class AdvertisementUpdate(BaseModel):
+    title: str = Field(min_length=1, max_length=100)
+    text: str = Field(min_length=1)
+    price: int = Field(ge=0)
+    status: str = Field(max_length=20)
 
 
 with engine.begin() as connection:
@@ -97,72 +125,79 @@ def row_to_dict(row, keys):
     return dict(zip(keys, row)) if row else None
 
 @app.post("/api/users")
-def create_user(name: str, email: str, phone: str = None, db: Session = Depends(get_db)):
-    if db.execute(sql_text("SELECT id FROM users WHERE email = :email"), {"email": email}).fetchone():
+def create_user(user_data: UserCreate, db: Session = Depends(get_db)):
+    existing_user = db.execute(select(User).where(User.email == user_data.email)).scalar_one_or_none()
+    if existing_user:
         raise HTTPException(status_code=400, detail="Email уже зарегистрирован")
-
-    result = db.execute(sql_text("INSERT INTO users (name, email, phone) VALUES (:name, :email, :phone)"),
-                        {"name": name, "email": email, "phone": phone})
+    user = User(name=user_data.name, email=user_data.email, phone=user_data.phone)
+    db.add(user)
     db.commit()
-    user_id = db.execute(sql_text("SELECT id FROM users WHERE email = :email"), {"email": email}).scalar_one()
-    return {"id": user_id, "name": name, "email": email, "phone": phone}
+    db.refresh(user)
+    return {"id": user.id, "name": user.name, "email": user.email, "phone": user.phone, "balance": user.balance}
 
 
 @app.get("/api/users")
 def list_users(db: Session = Depends(get_db)):
-    rows = db.execute(sql_text("SELECT id, name, balance FROM users ORDER BY name, id")).fetchall()
-    return [row_to_dict(row, ["id", "name", "balance"]) for row in rows]
+    users = db.execute(select(User).order_by(User.name, User.id)).scalars().all()
+    return [{"id": user.id, "name": user.name, "balance": user.balance} for user in users]
 
 
 @app.get("/api/users/{user_id}")
 def get_user(user_id: int, db: Session = Depends(get_db)):
-    user = db.execute(sql_text("SELECT id, name, email, phone, balance FROM users WHERE id = :user_id"),
-                      {"user_id": user_id}).fetchone()
+    user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Пользователь не найден")
-    return row_to_dict(user, ["id", "name", "email", "phone", "balance"])
+    return {"id": user.id, "name": user.name, "email": user.email,
+            "phone": user.phone, "balance": user.balance}
 
 
 @app.post("/api/users/{user_id}/balance")
 def add_balance(user_id: int, amount: int = Query(..., gt=0), db: Session = Depends(get_db)):
-    check_entity_exists(db, "users", user_id)
-    db.execute(sql_text("UPDATE users SET balance = balance + :amount WHERE id = :user_id"),
-               {"amount": amount, "user_id": user_id})
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    user.balance += amount
     db.commit()
-    balance = db.execute(sql_text("SELECT balance FROM users WHERE id = :user_id"), {"user_id": user_id}).scalar_one()
-    return {"user_id": user_id, "balance": balance}
+    db.refresh(user)
+    return {"user_id": user_id, "balance": user.balance}
 
 
 @app.put("/api/users/{user_id}")
-def update_user(user_id: int, name: str, email: str, phone: str = None, db: Session = Depends(get_db)):
-    check_entity_exists(db, "users", user_id)
-    db.execute(sql_text("UPDATE users SET name = :name, email = :email, phone = :phone WHERE id = :user_id"),
-               {"name": name, "email": email, "phone": phone, "user_id": user_id})
+def update_user(user_id: int, user_data: UserUpdate, db: Session = Depends(get_db)):
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    duplicate = db.execute(select(User).where(User.email == user_data.email, User.id != user_id)).scalar_one_or_none()
+    if duplicate:
+        raise HTTPException(status_code=400, detail="Email уже зарегистрирован")
+    user.name = user_data.name
+    user.email = user_data.email
+    user.phone = user_data.phone
     db.commit()
-    return {"id": user_id, "name": name, "email": email, "phone": phone}
+    db.refresh(user)
+    return {"id": user.id, "name": user.name, "email": user.email, "phone": user.phone}
 
 
 @app.delete("/api/users/{user_id}")
 def delete_user(user_id: int, db: Session = Depends(get_db)):
-    check_entity_exists(db, "users", user_id)
-    db.execute(sql_text("DELETE FROM users WHERE id = :user_id"), {"user_id": user_id})
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    db.delete(user)
     db.commit()
     return {"message": "Пользователь успешно удален"}
 
 @app.post("/api/ads")
-def create_ad(owner_id: int, title: str, text_content: str, price: int, status: str = "активно",
-              db: Session = Depends(get_db)):
-    check_entity_exists(db, "users", owner_id)
-
-    result = db.execute(sql_text(
-        "INSERT INTO advertisements (owner_id, title, text, price, status) VALUES (:owner_id, :title, :text, :price, :status)"),
-                        {"owner_id": owner_id, "title": title, "text": text_content, "price": price, "status": status})
+def create_ad(ad_data: AdvertisementCreate, db: Session = Depends(get_db)):
+    owner = db.get(User, ad_data.owner_id)
+    if not owner:
+        raise HTTPException(status_code=404, detail="Продавец не найден")
+    ad = Advertisement(**ad_data.model_dump())
+    db.add(ad)
     db.commit()
-    ad_id = db.execute(sql_text(
-        "SELECT TOP 1 id FROM advertisements WHERE owner_id = :owner_id AND title = :title ORDER BY id DESC"),
-        {"owner_id": owner_id, "title": title}).scalar_one()
-    return {"id": ad_id, "owner_id": owner_id, "title": title, "text": text_content, "price": price,
-            "status": status}
+    db.refresh(ad)
+    return {"id": ad.id, "owner_id": ad.owner_id, "title": ad.title,
+            "text": ad.text, "price": ad.price, "status": ad.status}
 
 
 @app.get("/api/ads")
@@ -173,34 +208,31 @@ def get_ads(
     limit: int = Query(6, ge=1, le=100, description="Количество объявлений на странице"),
     db: Session = Depends(get_db),
 ):
-    skip = (page - 1) * limit
-    conditions = []
-    params = {"limit": limit, "offset": skip}
-
+    filters = []
     if search:
-        conditions.append("(title LIKE :search OR text LIKE :search)")
-        params["search"] = f"%{search.strip()}%"
+        pattern = f"%{search.strip()}%"
+        filters.append(or_(Advertisement.title.like(pattern), Advertisement.text.like(pattern)))
     if status:
-        conditions.append("status = :status")
-        params["status"] = status
+        filters.append(Advertisement.status == status)
 
-    where_sql = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-    total = db.execute(sql_text(f"SELECT COUNT(*) FROM advertisements{where_sql}"), params).scalar_one()
-    sql = f"""
-        SELECT a.id, a.owner_id, a.title, a.text, a.price, a.status, a.date, u.name AS seller_name
-        FROM advertisements a
-        JOIN users u ON u.id = a.owner_id
-        {where_sql.replace('title', 'a.title').replace('text', 'a.text').replace('status', 'a.status')}
-    """
-    if engine.dialect.name == "mssql":
-        sql += " ORDER BY a.id DESC OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY"
-    else:
-        sql += " ORDER BY a.id DESC LIMIT :limit OFFSET :offset"
-
-    result = db.execute(sql_text(sql), params).fetchall()
-    keys = ["id", "owner_id", "title", "text", "price", "status", "date", "seller_name"]
+    total_query = select(func.count(Advertisement.id)).where(*filters)
+    total = db.execute(total_query).scalar_one()
+    skip = (page - 1) * limit
+    ads_query = (
+        select(Advertisement, User.name)
+        .join(User, Advertisement.owner_id == User.id)
+        .where(*filters)
+        .order_by(Advertisement.id.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    rows = db.execute(ads_query).all()
     return {
-        "items": [row_to_dict(row, keys) for row in result],
+        "items": [
+            {"id": ad.id, "owner_id": ad.owner_id, "title": ad.title, "text": ad.text,
+             "price": ad.price, "status": ad.status, "date": ad.date, "seller_name": seller_name}
+            for ad, seller_name in rows
+        ],
         "page": page,
         "limit": limit,
         "total": total,
@@ -210,27 +242,39 @@ def get_ads(
 
 @app.get("/api/ads/{ad_id}")
 def get_ad(ad_id: int, db: Session = Depends(get_db)):
-    ad = db.execute(sql_text("SELECT id, owner_id, title, text, price, status, date FROM advertisements WHERE id = :ad_id"),
-                    {"ad_id": ad_id}).fetchone()
+    row = db.execute(
+        select(Advertisement, User.name)
+        .join(User, Advertisement.owner_id == User.id)
+        .where(Advertisement.id == ad_id)
+    ).first()
+    ad = row[0] if row else None
     if not ad:
         raise HTTPException(status_code=404, detail="Объявление не найдено")
-    return row_to_dict(ad, ["id", "owner_id", "title", "text", "price", "status", "date"])
+    return {"id": ad.id, "owner_id": ad.owner_id, "title": ad.title, "text": ad.text,
+            "price": ad.price, "status": ad.status, "date": ad.date, "seller_name": row[1]}
 
 
 @app.put("/api/ads/{ad_id}")
-def update_ad(ad_id: int, title: str, text_content: str, price: int, status: str, db: Session = Depends(get_db)):
-    check_entity_exists(db, "advertisements", ad_id)
-    db.execute(sql_text(
-        "UPDATE advertisements SET title = :title, text = :text, price = :price, status = :status WHERE id = :ad_id"),
-               {"title": title, "text": text_content, "price": price, "status": status, "ad_id": ad_id})
+def update_ad(ad_id: int, ad_data: AdvertisementUpdate, db: Session = Depends(get_db)):
+    ad = db.get(Advertisement, ad_id)
+    if not ad:
+        raise HTTPException(status_code=404, detail="Объявление не найдено")
+    ad.title = ad_data.title
+    ad.text = ad_data.text
+    ad.price = ad_data.price
+    ad.status = ad_data.status
     db.commit()
-    return {"id": ad_id, "title": title, "text": text_content, "price": price, "status": status}
+    db.refresh(ad)
+    return {"id": ad.id, "owner_id": ad.owner_id, "title": ad.title,
+            "text": ad.text, "price": ad.price, "status": ad.status}
 
 
 @app.delete("/api/ads/{ad_id}")
 def delete_ad(ad_id: int, db: Session = Depends(get_db)):
-    check_entity_exists(db, "advertisements", ad_id)
-    db.execute(sql_text("DELETE FROM advertisements WHERE id = :ad_id"), {"ad_id": ad_id})
+    ad = db.get(Advertisement, ad_id)
+    if not ad:
+        raise HTTPException(status_code=404, detail="Объявление не найдено")
+    db.delete(ad)
     db.commit()
     return {"message": "Объявление успешно удалено"}
 

@@ -3,3 +3,4 @@ venv/
 avito.db
 .idea/
 __pycache__/
+.env

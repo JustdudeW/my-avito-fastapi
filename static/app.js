@@ -109,8 +109,16 @@ $('#closeAd').addEventListener('click', () => $('#adModal').classList.add('hidde
 $('#adModal').addEventListener('click', event => { if (event.target.id === 'adModal') $('#adModal').classList.add('hidden'); });
 $('#detailBuy').addEventListener('click', () => { if (selectedAd) buyAd(Number(selectedAd.id)); });
 $('#createForm').addEventListener('submit', async event => {
-  event.preventDefault(); const form = new FormData(event.target); const params = new URLSearchParams(form); params.set('status', 'активно');
-  try { const response = await fetch(`/api/ads?${params}`, { method:'POST' }); const data = await response.json(); if (!response.ok) throw new Error(data.detail || 'Ошибка публикации'); $('#createModal').classList.add('hidden'); event.target.reset(); await loadAds(1); }
+  event.preventDefault();
+  const form = new FormData(event.target);
+  const payload = {
+    owner_id: Number(form.get('owner_id')),
+    title: form.get('title'),
+    text: form.get('text_content'),
+    price: Number(form.get('price')),
+    status: 'активно',
+  };
+  try { const response = await fetch('/api/ads', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) }); const data = await response.json(); if (!response.ok) throw new Error(data.detail || 'Ошибка публикации'); $('#createModal').classList.add('hidden'); event.target.reset(); await loadAds(1); }
   catch (error) { $('#formError').textContent = error.message; }
 });
 loadAds();
